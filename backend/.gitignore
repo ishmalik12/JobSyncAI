@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+data/job_embeddings.npz
+.env
+.venv/
+__pycache__/

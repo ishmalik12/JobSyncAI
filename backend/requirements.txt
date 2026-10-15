@@ -1,0 +1,20 @@
+﻿# JobSync AI backend dependencies (Python 3.11+).
+# Install from the backend directory with: python -m pip install -r requirements.txt
+
+# FastAPI API server and request validation
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+python-multipart>=0.0.20,<1
+pydantic>=2.10,<3
+
+# Resume PDF parsing and job matching
+PyMuPDF>=1.25,<2
+sentence-transformers>=3,<7
+scikit-learn>=1.5,<2
+numpy>=1.26,<3
+
+# Job board fetching, MongoDB, and authentication
+requests>=2.32,<3
+pymongo[srv]>=4.11,<5
+PyJWT[crypto]>=2.10,<3
+pwdlib[argon2]>=0.2,<1

@@ -1,0 +1,84 @@
+﻿
+[
+  {
+    "ats": "ashby",
+    "slug": "openai",
+    "name": "OpenAI",
+    "max_jobs": 150
+  },
+  {
+    "ats": "ashby",
+    "slug": "level-ai",
+    "name": "Level AI"
+  },
+  {
+    "ats": "ashby",
+    "slug": "ema",
+    "name": "Ema"
+  },
+  {
+    "ats": "ashby",
+    "slug": "bolna",
+    "name": "Bolna"
+  },
+  {
+    "ats": "ashby",
+    "slug": "outmarket",
+    "name": "Outmarket AI"
+  },
+  {
+    "ats": "lever",
+    "slug": "klearnow",
+    "name": "KlearNow.ai"
+  },
+  {
+    "ats": "lever",
+    "slug": "lingarogroup",
+    "name": "Lingaro"
+  },
+  {
+    "ats": "lever",
+    "slug": "100ms",
+    "name": "100ms"
+  },
+  {
+    "ats": "lever",
+    "slug": "weekdayworks",
+    "name": "Weekday"
+  },
+  {
+    "ats": "lever",
+    "slug": "tryjeeves",
+    "name": "Jeeves"
+  },
+  {
+    "ats": "greenhouse",
+    "slug": "razorpaysoftwareprivatelimited",
+    "name": "Razorpay"
+  },
+  {
+    "ats": "greenhouse",
+    "slug": "inmobi",
+    "name": "InMobi"
+  },
+  {
+    "ats": "lever",
+    "slug": "meesho",
+    "name": "Meesho"
+  },
+  {
+    "ats": "smartrecruiters",
+    "slug": "Freshworks",
+    "name": "Freshworks"
+  },
+  {
+    "ats": "greenhouse",
+    "slug": "groww",
+    "name": "Groww"
+  },
+  {
+    "ats": "smartrecruiters",
+    "slug": "Zomato1",
+    "name": "Zomato"
+  }
+]
