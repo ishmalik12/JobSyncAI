@@ -63,6 +63,8 @@ def _create_indexes(database: Any) -> None:
     database.saved_jobs.create_index([("user_id", 1), ("job_id", 1)], unique=True, name="saved_jobs_user_job_unique")
     database.applications.create_index([("user_id", 1), ("job_id", 1)], unique=True, name="applications_user_job_unique")
     database.user_preferences.create_index("user_id", unique=True, name="preferences_user_unique")
+    database.job_visits.create_index([("user_id", 1), ("visited_at", -1)], name="job_visits_user_time")
+    database.job_visits.create_index([("user_id", 1), ("job_id", 1), ("visited_at", -1)], name="job_visits_user_job_time")
     database.ingestion_runs.create_index([("started_at", -1)], name="ingestion_runs_started")
     database.ingestion_runs.create_index([("source_id", 1), ("started_at", -1)], name="ingestion_source_history")
 

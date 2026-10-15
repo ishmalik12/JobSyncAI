@@ -187,10 +187,23 @@ class AuthenticationTests(unittest.TestCase):
                 self.assertEqual(client.get("/applications", headers=headers).json()[0]["status"], "Interviewing")
                 preferences = {"required_skills": ["Python"], "min_score": 35, "theme": "dark"}
                 self.assertEqual(client.put("/preferences", headers=headers, json=preferences).json(), preferences)
+                profile = client.get("/users/me", headers=headers)
+                self.assertEqual(profile.status_code, 200)
+                self.assertEqual(profile.json()["email"], "Person@example.test")
+                changed_profile = client.patch("/users/me", headers=headers, json={
+                    "name": "Updated Person", "preferred_titles": ["Engineer"],
+                    "preferred_locations": ["Remote"], "remote_preference": "remote",
+                    "employment_types": ["Full-time"], "interests": ["Python"],
+                })
+                self.assertEqual(changed_profile.status_code, 200, changed_profile.text)
+                self.assertEqual(changed_profile.json()["name"], "Updated Person")
+                self.assertEqual(client.get("/users/me", headers={"Authorization": "Bearer " + ""}).status_code, 401)
                 other = client.post("/auth/register", json={"email": "other@example.test", "password": "another secure password"})
                 other_headers = {"Authorization": "Bearer " + other.json()["access_token"]}
                 self.assertEqual(client.get("/saved-jobs", headers=other_headers).json(), [])
                 self.assertEqual(client.get("/applications", headers=other_headers).json(), [])
+                self.assertEqual(client.delete("/applications/job-1", headers=other_headers).status_code, 404)
+                self.assertEqual(client.delete("/applications/job-1", headers=headers).status_code, 200)
                 self.assertEqual(client.post("/auth/logout", headers=headers).status_code, 200)
                 self.assertEqual(client.get("/auth/me", headers=headers).status_code, 401)
 

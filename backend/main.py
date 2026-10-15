@@ -4,7 +4,7 @@ import re
 import asyncio
 import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, UploadFile, File, HTTPException, Request
@@ -240,6 +240,19 @@ class ApplicationUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class ProfileUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    preferred_titles: list[str] = Field(default_factory=list, max_length=20)
+    preferred_locations: list[str] = Field(default_factory=list, max_length=20)
+    remote_preference: str = Field(default="any", max_length=20)
+    employment_types: list[str] = Field(default_factory=list, max_length=10)
+    interests: list[str] = Field(default_factory=list, max_length=30)
+
+
+class VisitRequest(BaseModel):
+    job_id: str = Field(min_length=1, max_length=300)
+
+
 APPLICATION_STATUSES = {"Saved", "Applied", "Interviewing", "Rejected", "Offered", "Withdrawn"}
 
 
@@ -252,7 +265,16 @@ def _user_collection(name: str):
 
 
 def _auth_user_document(user: dict) -> dict:
-    return {"id": str(user["_id"]), "email": user["email"], "name": user.get("name", "")}
+    return {"id": str(user["_id"]), "email": user["email"], "name": user.get("name", ""),
+            "created_at": user.get("created_at")}
+
+
+def _visit_object_id(visit_id: str):
+    try:
+        from bson import ObjectId
+        return ObjectId(visit_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid visit id.") from exc
 
 
 def lookup_catalog_jobs(job_ids: list[str]) -> dict[str, dict]:
@@ -310,6 +332,70 @@ def me(user: dict = Depends(current_user)):
     return user
 
 
+@app.get("/users/me")
+def get_profile(user: dict = Depends(current_user)):
+    account = _user_collection("users").find_one({"_id": user["id"]})
+    if not account:
+        raise HTTPException(status_code=404, detail="Account was not found.")
+    preferences = _user_collection("user_preferences").find_one({"user_id": user["id"]}) or {}
+    profile_fields = ("preferred_titles", "preferred_locations", "remote_preference", "employment_types", "interests")
+    return {**_auth_user_document(account), **{key: preferences.get(key, [] if key != "remote_preference" else "any") for key in profile_fields}}
+
+
+@app.patch("/users/me")
+def update_profile(body: ProfileUpdate, user: dict = Depends(current_user)):
+    values = body.model_dump()
+    for key in ("preferred_titles", "preferred_locations", "employment_types", "interests"):
+        if any(not isinstance(value, str) or not value.strip() or len(value) > 100 for value in values[key]):
+            raise HTTPException(status_code=422, detail=f"{key} must contain non-empty strings up to 100 characters.")
+        values[key] = list(dict.fromkeys(value.strip() for value in values[key]))
+    if values["remote_preference"] not in {"any", "remote", "hybrid", "onsite"}:
+        raise HTTPException(status_code=422, detail="Unsupported remote-work preference.")
+    name = values.pop("name").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name cannot be empty.")
+    _user_collection("users").update_one({"_id": user["id"]}, {"$set": {"name": name}})
+    _user_collection("user_preferences").update_one({"user_id": user["id"]}, {"$set": {**values, "user_id": user["id"], "updated_at": datetime.now(timezone.utc)}}, upsert=True)
+    return get_profile(user)
+
+
+@app.get("/users/me/job-visits")
+def list_job_visits(user: dict = Depends(current_user)):
+    rows = list(_user_collection("job_visits").find({"user_id": user["id"]}).sort("visited_at", -1).limit(200))
+    jobs = lookup_catalog_jobs([str(row["job_id"]) for row in rows])
+    return [{"id": str(row["_id"]), "job_id": row["job_id"], "visited_at": row["visited_at"],
+             "job": jobs.get(str(row["job_id"])) or row.get("job_snapshot")} for row in rows]
+
+
+@app.post("/users/me/job-visits")
+def record_job_visit(body: VisitRequest, user: dict = Depends(current_user)):
+    job = lookup_catalog_jobs([body.job_id]).get(body.job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job listing was not found.")
+    visits = _user_collection("job_visits")
+    now = datetime.now(timezone.utc)
+    recent = visits.find_one({"user_id": user["id"], "job_id": body.job_id, "visited_at": {"$gte": now - timedelta(minutes=5)}})
+    if recent:
+        visits.update_one({"_id": recent["_id"]}, {"$set": {"visited_at": now, "job_snapshot": job}})
+        return {"id": str(recent["_id"]), "job_id": body.job_id, "visited_at": now, "job": job}
+    result = visits.insert_one({"user_id": user["id"], "job_id": body.job_id, "visited_at": now, "job_snapshot": job})
+    return {"id": str(result.inserted_id), "job_id": body.job_id, "visited_at": now, "job": job}
+
+
+@app.delete("/users/me/job-visits/{visit_id}")
+def delete_job_visit(visit_id: str, user: dict = Depends(current_user)):
+    result = _user_collection("job_visits").delete_one({"_id": _visit_object_id(visit_id), "user_id": user["id"]})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Visit was not found.")
+    return {"ok": True}
+
+
+@app.delete("/users/me/job-visits")
+def clear_job_visits(user: dict = Depends(current_user)):
+    result = _user_collection("job_visits").delete_many({"user_id": user["id"]})
+    return {"deleted": result.deleted_count}
+
+
 @app.post("/auth/logout")
 def logout(authorization: str | None = Header(default=None), user: dict = Depends(current_user)):
     revoke_session(authorization)
@@ -347,7 +433,7 @@ def unsave_job(job_id: str, user: dict = Depends(current_user)):
 def list_applications(user: dict = Depends(current_user)):
     records = list(_user_collection("applications").find({"user_id": user["id"]}).sort("updated_at", -1))
     jobs = lookup_catalog_jobs([str(row["job_id"]) for row in records])
-    return [{"status": row["status"], "notes": row.get("notes", ""), "updated_at": row.get("updated_at"),
+    return [{"status": row["status"], "notes": row.get("notes", ""), "created_at": row.get("created_at"), "updated_at": row.get("updated_at"),
              "job": jobs.get(str(row["job_id"])) or row.get("job_snapshot")}
             for row in records if jobs.get(str(row["job_id"])) or row.get("job_snapshot")]
 
@@ -382,6 +468,14 @@ def update_application(job_id: str, body: ApplicationUpdate, user: dict = Depend
     if not result.matched_count:
         raise HTTPException(status_code=404, detail="Tracked application was not found.")
     return {"job_id": job_id, **fields}
+
+
+@app.delete("/applications/{job_id}")
+def delete_application(job_id: str, user: dict = Depends(current_user)):
+    result = _user_collection("applications").delete_one({"user_id": user["id"], "job_id": job_id})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Tracked application was not found.")
+    return {"ok": True}
 
 
 @app.get("/preferences")

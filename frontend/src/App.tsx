@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import {
   ArrowRight, Bookmark, BrainCircuit, BriefcaseBusiness, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, FileText, FilterX, Globe2,
   LoaderCircle, MapPin, Menu, Moon, Search, Sparkles, Sun,
-  LogOut, ShieldCheck, Target, UploadCloud, UserRound, Wifi, WifiOff, X, Zap,
+  ShieldCheck, Target, UploadCloud, Wifi, WifiOff, X, Zap,
 } from "lucide-react";
 
 const API = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -120,7 +120,7 @@ function matchesRequiredSkills(job: Job, requiredSkills: string[], mode: "any" |
     : selected.some((skill) => jobSkills.has(skill));
 }
 
-export default function App() {
+export function Dashboard() {
   const fileInput = useRef<HTMLInputElement>(null);
   const matchController = useRef<AbortController | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -153,15 +153,9 @@ export default function App() {
   const [firstResultMs, setFirstResultMs] = useState<number | null>(null);
   const [authToken, setAuthToken] = useState(initialAuthToken);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [authName, setAuthName] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [savedJobs, setSavedJobs] = useState<SavedJob[]>([]);
   const [applications, setApplications] = useState<TrackedApplication[]>([]);
-  const [personalTab, setPersonalTab] = useState<"saved" | "applications">("saved");
   const matchStartedAt = useRef<number | null>(null);
 
   useEffect(() => {
@@ -506,29 +500,6 @@ export default function App() {
     setPage(1);
   }
 
-  async function submitAuth(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAuthBusy(true);
-    setAuthError("");
-    try {
-      const response = await fetch(API + (authMode === "register" ? "/auth/register" : "/auth/login"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: authEmail, password: authPassword, name: authName }),
-      });
-      if (!response.ok) throw new Error(await responseError(response, "Could not sign in."));
-      const data = await response.json() as { access_token: string; user: AuthUser };
-      try { localStorage.setItem("jobsync-token", data.access_token); } catch { /* Session remains active until reload. */ }
-      setAuthUser(data.user);
-      setAuthPassword("");
-      setAuthToken(data.access_token);
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "Could not sign in.");
-    } finally {
-      setAuthBusy(false);
-    }
-  }
-
   function signOut() {
     if (authToken) void fetch(API + "/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${authToken}` } });
     try { localStorage.removeItem("jobsync-token"); } catch { /* Sign-out still clears this view. */ }
@@ -578,20 +549,6 @@ export default function App() {
     } catch (err) { setAuthError(err instanceof Error ? err.message : "Could not update application tracking."); }
   }
 
-  async function persistPreferences() {
-    if (!authToken) return;
-    const response = await fetch(API + "/preferences", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-      body: JSON.stringify({ search, location_search: locationSearch, remote_only: remoteOnly,
-        india_only: indiaOnly, remote_india_only: remoteIndiaOnly, role_type: roleType,
-        min_score: minScore, required_skills: requiredSkills, skill_match_mode: skillMatchMode,
-        sort_mode: sortMode, theme }),
-    });
-    if (!response.ok) { setAuthError(await responseError(response, "Could not save preferences.")); return; }
-    setAuthError("Preferences saved.");
-  }
-
   function toggleTheme() {
     const next = theme === "dark" ? "light" : "dark";
     try { localStorage.setItem("jobsync-theme", next); } catch { /* Theme still changes for this session. */ }
@@ -612,8 +569,24 @@ export default function App() {
     });
   }
 
+  async function recordJobVisit(job: Job) {
+    if (!authToken) return;
+    try {
+      const response = await fetch(API + "/users/me/job-visits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ job_id: String(job.id) }),
+      });
+      if (!response.ok && response.status === 401) {
+        try { localStorage.removeItem("jobsync-token"); } catch { /* Session is cleared in memory below. */ }
+        setAuthToken(""); setAuthUser(null);
+      }
+    } catch { /* Activity is optional while the backend is offline. */ }
+  }
+
   const statusCopy = apiStatus === "online" ? "API connected"
     : apiStatus === "offline" ? "API unavailable" : "Checking API";
+  const avatarLabel = (authUser?.name || authUser?.email || "U").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0].toLocaleUpperCase()).join("");
 
   return (
     <div id="dashboard" className="min-h-screen bg-[#f5f7fb] text-slate-900">
@@ -633,6 +606,7 @@ export default function App() {
             <span className={"text-xs font-medium " + (apiStatus === "online" ? "text-emerald-700" : apiStatus === "offline" ? "text-rose-600" : "text-slate-500")}>{statusCopy}</span>
           </div>
           <div className="flex items-center gap-2">
+          {authUser ? <details className="relative"><summary aria-label="Profile menu" className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{avatarLabel}</span><span className="hidden sm:inline">{authUser.name || authUser.email}</span><ChevronDown size={14} /></summary><div className="absolute right-0 top-12 z-40 min-w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/profile">Profile</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/applications">Applications</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/activity">Activity</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/saved-jobs">Saved Jobs</a><button onClick={signOut} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50">Logout</button></div></details> : <a href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Login</a>}
           <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} aria-pressed={theme === "dark"} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"><span aria-hidden="true">{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</span><span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span></button>
           <button type="button" className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 md:hidden" aria-label={mobileNavOpen ? "Close menu" : "Open menu"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>
             {mobileNavOpen ? <X size={21} /> : <Menu size={21} />}
@@ -648,6 +622,7 @@ export default function App() {
       </header>
 
       <main id="home" className="mx-auto max-w-[1400px] px-4 pb-16 pt-8 sm:px-6 sm:pt-11 lg:px-10">
+        {authError && <p role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">{authError}</p>}
         <section className="hero-panel grid items-center gap-10 overflow-hidden rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm sm:p-9 lg:grid-cols-[1.12fr_0.88fr] lg:px-12 lg:py-12">
           <div>
             <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700"><Zap size={14} /> A clearer path from resume to opportunity</div>
@@ -745,32 +720,6 @@ export default function App() {
           </aside>
         </section>
 
-          <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6" aria-labelledby="account-heading">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><p className="text-xs font-bold uppercase tracking-[0.14em] text-indigo-600">Your workspace</p><h2 id="account-heading" className="mt-1 text-xl font-bold text-slate-900">Saved jobs and applications</h2><p className="mt-1 text-sm text-slate-500">Sign in to keep your shortlist and application status across sessions.</p></div>
-              {authUser && <div className="flex items-center gap-3"><span className="inline-flex items-center gap-2 text-sm font-medium text-slate-700"><UserRound size={16} />{authUser.name || authUser.email}</span><button type="button" onClick={signOut} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"><LogOut size={14} /> Sign out</button></div>}
-            </div>
-            {authError && <p className={`mt-3 rounded-lg px-3 py-2 text-sm ${authError === "Preferences saved." ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-800"}`} role="status">{authError}</p>}
-            {!authUser ? (
-              <form onSubmit={submitAuth} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {authMode === "register" && <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-600">Name</span><input autoComplete="name" value={authName} onChange={(event) => setAuthName(event.target.value)} maxLength={100} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" /></label>}
-                <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-600">Email</span><input type="email" autoComplete="email" required value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" /></label>
-                <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-600">Password</span><input type="password" autoComplete={authMode === "register" ? "new-password" : "current-password"} minLength={10} required value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" /></label>
-                <div className="flex flex-wrap items-end gap-2"><button type="submit" disabled={authBusy} className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50">{authBusy && <LoaderCircle size={14} className="animate-spin" />}{authMode === "register" ? "Create account" : "Sign in"}</button><button type="button" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }} className="h-10 rounded-lg px-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">{authMode === "login" ? "Create an account" : "I already have an account"}</button></div>
-              </form>
-            ) : (
-              <div className="mt-4">
-                <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
-                  <button type="button" aria-pressed={personalTab === "saved"} onClick={() => setPersonalTab("saved")} className={`rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 ${personalTab === "saved" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}><Bookmark size={14} className="mr-1 inline" />Saved ({savedJobs.length})</button>
-                  <button type="button" aria-pressed={personalTab === "applications"} onClick={() => setPersonalTab("applications")} className={`rounded-lg px-3 py-2 text-xs font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 ${personalTab === "applications" ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>Applications ({applications.length})</button>
-                  <button type="button" onClick={persistPreferences} className="ml-auto min-h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">Save current filters</button>
-                </div>
-                {personalTab === "saved" ? savedJobs.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{savedJobs.map(({ job }) => <div key={String(job.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{job.title}</p><p className="mt-1 text-xs text-slate-500">{job.company}{job.location ? ` · ${job.location}` : ""}{job.source ? ` · ${job.source}` : ""}</p></div><div className="flex items-center gap-2">{job.apply_url && <a href={job.apply_url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-indigo-700 hover:underline">Open posting</a>}<button type="button" onClick={() => void toggleSavedJob(job)} aria-label={`Remove ${job.title} from saved jobs`} className="rounded-md p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"><X size={15} /></button></div></div>)}</div> : <p className="mt-3 rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">No saved jobs yet. Save a role from your matches to find it here.</p>
-                  : applications.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{applications.map(({ job, status }) => <div key={String(job.id)} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{job.title}</p><p className="mt-1 text-xs text-slate-500">{job.company}{job.location ? ` · ${job.location}` : ""}</p></div><select aria-label={`Application status for ${job.title}`} value={status} onChange={(event) => void updateApplication(job, event.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">{APPLICATION_STATUSES.map((item) => <option key={item}>{item}</option>)}</select></div>)}</div> : <p className="mt-3 rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">No applications tracked yet. Choose a status on any matching job.</p>}
-              </div>
-            )}
-          </section>
-
           {(jobs.length > 0 || matching) && (
           <section id="find-jobs" className="mt-12 scroll-mt-24" aria-labelledby="jobs-heading">
             <div className="flex flex-wrap items-end justify-between gap-4">
@@ -850,7 +799,7 @@ export default function App() {
 
                       <div className="mt-5 border-t border-slate-100 pt-4">
                         <p id={"description-" + encodeURIComponent(id)} className={"text-sm leading-6 text-slate-600 " + (isExpanded ? "" : "line-clamp-3")}>{description}</p>
-                        {description.length > 240 && <button type="button" aria-expanded={isExpanded} aria-controls={"description-" + encodeURIComponent(id)} onClick={() => toggleDescription(id)} className="mt-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">{isExpanded ? "Show less" : "Read full description"}</button>}
+                        {description.length > 240 && <button type="button" aria-expanded={isExpanded} aria-controls={"description-" + encodeURIComponent(id)} onClick={() => { toggleDescription(id); if (!isExpanded) void recordJobVisit(job); }} className="mt-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">{isExpanded ? "Show less" : "Read full description"}</button>}
                         {job.posted_at && <p className="mt-2 text-xs text-slate-400">Posted {formatPostingDate(job.posted_at)}</p>}
                       </div>
 
