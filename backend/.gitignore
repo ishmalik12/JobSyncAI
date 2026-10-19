@@ -1,6 +1,10 @@
 __pycache__/
 .venv/
 data/job_embeddings.npz
+
+# Environment variables
 .env
-.venv/
-__pycache__/
+.env.local
+.env.*.local
+.env.*
+!.env.example
