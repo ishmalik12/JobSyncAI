@@ -67,6 +67,9 @@ def _create_indexes(database: Any) -> None:
     database.job_visits.create_index([("user_id", 1), ("job_id", 1), ("visited_at", -1)], name="job_visits_user_job_time")
     database.ingestion_runs.create_index([("started_at", -1)], name="ingestion_runs_started")
     database.ingestion_runs.create_index([("source_id", 1), ("started_at", -1)], name="ingestion_source_history")
+    database.growth_logs.create_index([("user_id", 1), ("created_at", -1)], name="growth_logs_user_time")
+    database.interview_chats.create_index([("user_id", 1), ("updated_at", -1)], name="interview_chats_user_time")
+    database.interview_memories.create_index([("user_id", 1), ("created_at", -1)], name="interview_memories_user_time")
 
 
 def get_database(required: bool = True):
@@ -194,7 +197,7 @@ def mark_catalog_migrated(count: int) -> None:
 
 
 def bump_catalog_revision(database: Any | None = None) -> None:
-    db = database or get_database()
+    db = database if database is not None else get_database()
     db.system_state.update_one(
         {"_id": "catalog_version"},
         {"$set": {"revision": uuid4().hex, "updated_at": datetime.now(timezone.utc)}},

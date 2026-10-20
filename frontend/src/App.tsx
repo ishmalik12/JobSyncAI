@@ -4,7 +4,7 @@ import {
   ArrowRight, Bookmark, BrainCircuit, BriefcaseBusiness, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, FileText, FilterX, Globe2,
   LoaderCircle, MapPin, Menu, Moon, Search, Sparkles, Sun,
-  ShieldCheck, Target, UploadCloud, Wifi, WifiOff, X, Zap,
+  ShieldCheck, Target, TrendingUp, UploadCloud, Wifi, WifiOff, X, Zap,
 } from "lucide-react";
 
 const API = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -47,6 +47,16 @@ type CatalogStats = { job_count: number; company_count: number; india_job_count:
 type AuthUser = { id: string; email: string; name: string };
 type SavedJob = { saved_at?: string; job: Job };
 type TrackedApplication = { status: typeof APPLICATION_STATUSES[number]; notes?: string; job: Job };
+type GrowthItem = {
+  id: string;
+  title: string;
+  category: string;
+  source?: string;
+  reflection?: string;
+  action_plan?: string;
+  status: "Identified" | "Practicing" | "Mastered";
+  created_at?: string;
+};
 
 function initialTheme(): Theme {
   try {
@@ -156,11 +166,13 @@ export function Dashboard() {
   const [authError, setAuthError] = useState("");
   const [savedJobs, setSavedJobs] = useState<SavedJob[]>([]);
   const [applications, setApplications] = useState<TrackedApplication[]>([]);
+  const [growthItems, setGrowthItems] = useState<GrowthItem[]>([]);
   const matchStartedAt = useRef<number | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = theme;
+    root.classList.toggle("dark", theme === "dark");
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     themeMeta?.setAttribute("content", theme === "dark" ? "#111827" : "#f5f7fb");
   }, [theme]);
@@ -184,15 +196,18 @@ export function Dashboard() {
       fetch(API + "/saved-jobs", { headers, signal: controller.signal }),
       fetch(API + "/applications", { headers, signal: controller.signal }),
       fetch(API + "/preferences", { headers, signal: controller.signal }),
-    ]).then(async ([userResponse, savedResponse, applicationsResponse, preferencesResponse]) => {
+      fetch(API + "/growth", { headers, signal: controller.signal }).catch(() => null),
+    ]).then(async ([userResponse, savedResponse, applicationsResponse, preferencesResponse, growthResponse]) => {
       if (!userResponse.ok) throw new Error("Your sign-in expired. Please sign in again.");
       const user = await userResponse.json() as AuthUser;
       const saved = savedResponse.ok ? await savedResponse.json() as SavedJob[] : [];
       const tracked = applicationsResponse.ok ? await applicationsResponse.json() as TrackedApplication[] : [];
       const preferences = preferencesResponse.ok ? await preferencesResponse.json() as Record<string, unknown> : {};
+      const growth = growthResponse && growthResponse.ok ? await growthResponse.json() as GrowthItem[] : [];
       setAuthUser(user);
       setSavedJobs(saved);
       setApplications(tracked);
+      setGrowthItems(growth);
       if (typeof preferences.search === "string") setSearch(preferences.search);
       if (typeof preferences.location_search === "string") setLocationSearch(preferences.location_search);
       if (typeof preferences.remote_only === "boolean") setRemoteOnly(preferences.remote_only);
@@ -213,6 +228,7 @@ export function Dashboard() {
         setAuthUser(null);
         setSavedJobs([]);
         setApplications([]);
+        setGrowthItems([]);
       }
     });
     return () => controller.abort();
@@ -507,17 +523,20 @@ export function Dashboard() {
     setAuthUser(null);
     setSavedJobs([]);
     setApplications([]);
+    setGrowthItems([]);
   }
 
   async function refreshPersonalData() {
     if (!authToken) return;
     const headers = { Authorization: `Bearer ${authToken}` };
-    const [savedResponse, applicationsResponse] = await Promise.all([
+    const [savedResponse, applicationsResponse, growthResponse] = await Promise.all([
       fetch(API + "/saved-jobs", { headers }),
       fetch(API + "/applications", { headers }),
+      fetch(API + "/growth", { headers }).catch(() => null),
     ]);
     if (savedResponse.ok) setSavedJobs(await savedResponse.json() as SavedJob[]);
     if (applicationsResponse.ok) setApplications(await applicationsResponse.json() as TrackedApplication[]);
+    if (growthResponse && growthResponse.ok) setGrowthItems(await growthResponse.json() as GrowthItem[]);
   }
 
   async function toggleSavedJob(job: Job) {
@@ -599,6 +618,18 @@ export function Dashboard() {
           <nav className="hidden items-center gap-8 md:flex" aria-label="Main navigation">
             <a className="text-sm font-medium text-slate-600 hover:text-indigo-700" href="#features">Features</a>
             <a className="text-sm font-medium text-slate-600 hover:text-indigo-700" href="#how-it-works">How it works</a>
+            <a className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-indigo-700" href="#growth">
+              <span>Weakness & Growth</span>
+              {growthItems.length > 0 && (
+                <span className="rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-bold text-indigo-700">
+                  {growthItems.length}
+                </span>
+              )}
+            </a>
+            <a className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-indigo-700" href="/coach">
+              <Sparkles size={14} className="text-purple-600" />
+              <span>Interview Coach</span>
+            </a>
             <a className="text-sm font-medium text-slate-600 hover:text-indigo-700" href="#resume-upload">Find jobs</a>
           </nav>
           <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 md:flex" aria-live="polite">
@@ -606,7 +637,7 @@ export function Dashboard() {
             <span className={"text-xs font-medium " + (apiStatus === "online" ? "text-emerald-700" : apiStatus === "offline" ? "text-rose-600" : "text-slate-500")}>{statusCopy}</span>
           </div>
           <div className="flex items-center gap-2">
-          {authUser ? <details className="relative"><summary aria-label="Profile menu" className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{avatarLabel}</span><span className="hidden sm:inline">{authUser.name || authUser.email}</span><ChevronDown size={14} /></summary><div className="absolute right-0 top-12 z-40 min-w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/profile">Profile</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/applications">Applications</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/activity">Activity</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/saved-jobs">Saved Jobs</a><button onClick={signOut} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50">Logout</button></div></details> : <a href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Login</a>}
+          {authUser ? <details className="relative"><summary aria-label="Profile menu" className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{avatarLabel}</span><span className="hidden sm:inline">{authUser.name || authUser.email}</span><ChevronDown size={14} /></summary><div className="absolute right-0 top-12 z-40 min-w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/profile">Profile</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/coach">Interview Coach</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/applications">Applications</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/growth">Weaknesses & Growth</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/activity">Activity</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/saved-jobs">Saved Jobs</a><button onClick={signOut} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50">Logout</button></div></details> : <a href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Login</a>}
           <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} aria-pressed={theme === "dark"} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"><span aria-hidden="true">{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</span><span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span></button>
           <button type="button" className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 md:hidden" aria-label={mobileNavOpen ? "Close menu" : "Open menu"} aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>
             {mobileNavOpen ? <X size={21} /> : <Menu size={21} />}
@@ -616,6 +647,20 @@ export function Dashboard() {
         {mobileNavOpen && <nav className="border-t border-slate-100 bg-white px-5 py-3 md:hidden" aria-label="Mobile navigation">
           <a onClick={() => setMobileNavOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="#features">Features</a>
           <a onClick={() => setMobileNavOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="#how-it-works">How it works</a>
+          <a onClick={() => setMobileNavOpen(false)} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="#growth">
+            <span>Weakness & Growth</span>
+            {growthItems.length > 0 && (
+              <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700">
+                {growthItems.length}
+              </span>
+            )}
+          </a>
+          <a onClick={() => setMobileNavOpen(false)} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="/coach">
+            <span className="flex items-center gap-1.5">
+              <Sparkles size={14} className="text-purple-600" />
+              Interview Coach
+            </span>
+          </a>
           <a onClick={() => setMobileNavOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="#resume-upload">Find jobs</a>
           <p className="flex items-center gap-2 px-3 pt-2 text-xs text-slate-500">{apiStatus === "online" ? <Wifi size={13} className="text-emerald-600" /> : <WifiOff size={13} className="text-rose-500" />}{statusCopy}</p>
         </nav>}
@@ -648,12 +693,146 @@ export function Dashboard() {
             <FeatureCard icon={<Zap size={19} />} title="Results as they arrive" text="Scored job cards appear in batches while the rest of the catalog is processed." />
             <FeatureCard icon={<Bookmark size={19} />} title="Saved jobs and tracking" text="Keep a shortlist and update each application from Saved through interview and offer outcomes." />
             <FeatureCard icon={<ShieldCheck size={19} />} title="Resume privacy" text="Resume text is processed by the local API for matching and is not stored with your account." />
+            <FeatureCard icon={<TrendingUp size={19} />} title="Weakness & Growth" text="Log interview reflections, identify skill blindspots, and systematically turn gaps into strengths." />
           </div>
         </section>
 
         <section id="how-it-works" className="mt-20 scroll-mt-24 rounded-3xl border border-slate-200 bg-slate-900 px-6 py-9 text-white sm:px-9 lg:px-12" aria-labelledby="how-heading">
           <div className="grid gap-8 lg:grid-cols-[0.7fr_1.3fr] lg:items-start"><div><p className="text-xs font-bold uppercase tracking-[0.16em] text-indigo-300">How it works</p><h2 id="how-heading" className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Three steps to your next move.</h2><p className="mt-4 text-sm leading-6 text-slate-300">A straightforward way to compare what you know with what employers are asking for.</p></div><ol className="grid gap-6 sm:grid-cols-3"><HowStep number="01" icon={<UploadCloud size={19} />} title="Upload your resume" text="Add a text-readable PDF. The app extracts its content before matching." /><HowStep number="02" icon={<Sparkles size={19} />} title="Review your fit" text="The matcher evaluates resume relevance and overlap with listed skills." /><HowStep number="03" icon={<ArrowRight size={19} />} title="Explore and apply" text="Compare roles, refine results, and follow the original application link." /></ol></div>
           <p className="mt-7 border-t border-white/10 pt-4 text-xs text-slate-400">Match scores estimate relevance between a resume and a listing; they are not probabilities of getting hired.</p>
+        </section>
+
+        <section id="growth" className="mt-20 scroll-mt-24 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9 lg:p-12" aria-labelledby="growth-heading">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8 pb-8 border-b border-slate-100">
+            <div className="max-w-2xl">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                <BrainCircuit size={14} /> Weakness & Growth Engine
+              </div>
+              <h2 id="growth-heading" className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
+                Turn your interview gaps into <span className="text-indigo-600">career strengths.</span>
+              </h2>
+              <p className="mt-3 text-base text-slate-600 leading-relaxed">
+                JobSync AI doesn’t just show where you match — it highlights where you have skill blindspots. Log interview takeaways, track missing job requirements, and turn weaknesses into actionable study plans.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+              <a
+                href="/coach"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:from-violet-700 hover:to-indigo-700"
+              >
+                <Sparkles size={16} className="text-amber-300" /> AI Debrief Coach
+              </a>
+              <a
+                href="/growth"
+                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"
+              >
+                <TrendingUp size={16} /> Open Tracker
+              </a>
+              {authUser && (
+                <span className="text-center sm:text-left text-xs font-medium text-slate-500">
+                  {growthItems.length} {growthItems.length === 1 ? "record" : "records"} logged
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-8 grid gap-5 sm:grid-cols-3">
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 transition hover:border-indigo-200 hover:bg-indigo-50/30">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 font-bold text-sm">
+                01
+              </div>
+              <h3 className="mt-4 font-bold text-slate-900">1. Spot the Blindspot</h3>
+              <p className="mt-1.5 text-xs leading-5 text-slate-600">
+                Identify missing skills from target job descriptions or capture questions you stumbled on during recent technical interviews.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 transition hover:border-indigo-200 hover:bg-indigo-50/30">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-100 text-indigo-700 font-bold text-sm">
+                02
+              </div>
+              <h3 className="mt-4 font-bold text-slate-900">2. Structured Practice</h3>
+              <p className="mt-1.5 text-xs leading-5 text-slate-600">
+                Create clear action plans: tutorials, code implementations, system design deep-dives, and spaced repetition drills.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-5 transition hover:border-indigo-200 hover:bg-indigo-50/30">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 font-bold text-sm">
+                03
+              </div>
+              <h3 className="mt-4 font-bold text-slate-900">3. Proven Mastery</h3>
+              <p className="mt-1.5 text-xs leading-5 text-slate-600">
+                Transition your logs from <span className="font-semibold text-slate-700">Identified</span> → <span className="font-semibold text-slate-700">Practicing</span> → <span className="font-semibold text-emerald-700">Mastered</span> with measurable confidence.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-7 rounded-2xl border border-slate-200/80 bg-slate-50/50 p-5 sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                {growthItems.length > 0 ? "Your Active Growth Journey" : "Common Interview Blindspots You Can Track"}
+              </p>
+              <a href="/growth" className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                View all in workspace <ArrowRight size={13} />
+              </a>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {(growthItems.length > 0 ? growthItems.slice(0, 3) : [
+                { id: "sample-1", title: "Distributed Caching & Invalidation", category: "System Design", status: "Practicing" as const, reflection: "Got tripped up on Cache-Aside vs Write-Through failure modes." },
+                { id: "sample-2", title: "PostgreSQL Indexing & EXPLAIN Plans", category: "Technical Skills", status: "Mastered" as const, reflection: "Understood B-tree vs GIN indexes and sequential scan causes." },
+                { id: "sample-3", title: "Handling Conflict in Cross-Team Projects", category: "Behavioral & Soft Skills", status: "Identified" as const, reflection: "Prepare clear STAR stories highlighting empathy and stakeholder alignment." },
+              ]).map((item) => (
+                <div key={item.id} className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{item.category}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                        item.status === "Mastered"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+                          : item.status === "Practicing"
+                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200/60"
+                          : "bg-amber-50 text-amber-700 border border-amber-200/60"
+                      }`}>
+                        {item.status}
+                      </span>
+                    </div>
+                    <h4 className="mt-2 text-sm font-bold text-slate-900 line-clamp-1">{item.title}</h4>
+                    {item.reflection && (
+                      <p className="mt-1 text-xs text-slate-500 line-clamp-2 leading-relaxed">{item.reflection}</p>
+                    )}
+                  </div>
+                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                    <a href={`/growth?source=${encodeURIComponent(item.title)}`} className="font-semibold text-indigo-600 hover:underline">
+                      Review / Practice →
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Interview Debrief AI Mentor Callout */}
+        <section className="mt-8 rounded-3xl border border-indigo-100 bg-gradient-to-r from-violet-50 via-indigo-50 to-sky-50 p-6 sm:p-9 shadow-xs">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-3 py-0.5 text-xs font-semibold text-indigo-800">
+                <Sparkles size={13} className="text-indigo-600" /> AI Debrief Room · Intelligent Mentorship
+              </span>
+              <h3 className="text-2xl font-bold tracking-tight text-slate-900">
+                Just had an interview? Talk to your AI Coach.
+              </h3>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                “Everything is a learning until you win. Be patient to achieve big.” Share your entire experience—questions asked, tricky edge-cases, or rejections. The AI mentor boosts your confidence, memorizes your journey, and advises on what to target next.
+              </p>
+            </div>
+            <a
+              href="/coach"
+              className="inline-flex shrink-0 min-h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-md transition hover:from-violet-700 hover:to-indigo-700"
+            >
+              <Sparkles size={16} className="text-amber-300" /> Start AI Interview Debrief →
+            </a>
+          </div>
         </section>
 
         <section id="resume-upload" className="mt-20 scroll-mt-24 grid gap-6 lg:grid-cols-[minmax(0,1fr)_330px]" aria-labelledby="resume-heading">
@@ -797,6 +976,44 @@ export function Dashboard() {
                         </div>
                       </div>
 
+                      {Boolean((job.matched_skills && job.matched_skills.length > 0) || (job.missing_skills && job.missing_skills.length > 0)) && (
+                        <div className="mt-4 flex flex-col gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-xs">
+                          {job.matched_skills && job.matched_skills.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="flex items-center gap-1 font-semibold text-emerald-800 shrink-0">
+                                <Check size={13} className="text-emerald-600 stroke-[2.5]" /> Strengths:
+                              </span>
+                              {job.matched_skills.map((skill) => (
+                                <span key={skill} className="rounded-md border border-emerald-200/60 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+                                  {skill}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {job.missing_skills && job.missing_skills.length > 0 && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/60 pt-2">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="flex items-center gap-1 font-semibold text-amber-800 shrink-0">
+                                  <BrainCircuit size={13} className="text-amber-600" /> Weakness & Growth:
+                                </span>
+                                {job.missing_skills.map((skill) => (
+                                  <span key={skill} className="rounded-md border border-amber-200/80 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900">
+                                    {skill}
+                                  </span>
+                                ))}
+                              </div>
+                              <a
+                                href={`/growth?source=${encodeURIComponent((job.company || "Job") + " (" + (job.title || "Role") + ") - Focus: " + job.missing_skills.slice(0, 3).join(", "))}`}
+                                className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                              >
+                                <TrendingUp size={12} />
+                                <span>Track in Growth</span>
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="mt-5 border-t border-slate-100 pt-4">
                         <p id={"description-" + encodeURIComponent(id)} className={"text-sm leading-6 text-slate-600 " + (isExpanded ? "" : "line-clamp-3")}>{description}</p>
                         {description.length > 240 && <button type="button" aria-expanded={isExpanded} aria-controls={"description-" + encodeURIComponent(id)} onClick={() => { toggleDescription(id); if (!isExpanded) void recordJobVisit(job); }} className="mt-1 text-xs font-semibold text-indigo-700 hover:text-indigo-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">{isExpanded ? "Show less" : "Read full description"}</button>}
@@ -845,6 +1062,16 @@ export function Dashboard() {
           <p className="text-slate-400">React · FastAPI · Sentence Transformers</p>
         </div>
       </footer>
+
+      {/* Floating Action Button for Interview Coach */}
+      <a
+        href="/coach"
+        className="fixed bottom-6 right-6 z-40 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 px-4 py-3 text-xs font-bold text-white shadow-xl shadow-indigo-600/30 hover:scale-105 transition-all border border-white/20 backdrop-blur-sm"
+        title="Talk to AI Interview Coach"
+      >
+        <Sparkles size={15} className="text-amber-300 animate-pulse" />
+        <span>AI Interview Coach</span>
+      </a>
     </div>
   );
 }

@@ -1,4 +1,5 @@
-﻿import json
+import os
+import json
 import logging
 import re
 import asyncio
@@ -17,6 +18,12 @@ from matcher import match_jobs, performance_snapshot, prepare_match, rank_jobs, 
 from config import FRONTEND_ORIGIN, JOB_REFRESH_INTERVAL_HOURS, MONGODB_URI
 from database import catalog_migrated, connect_database, database_health, find_jobs_by_ids, get_database, list_jobs
 from security import current_user, create_session, hash_password, revoke_session, validate_auth_config, verify_password
+from interview_coach import (
+    build_coach_system_prompt,
+    call_gemini_chat,
+    get_effective_api_key,
+    GEMINI_MODEL,
+)
 
 logger = logging.getLogger(__name__)
 DATA_FILE = Path(__file__).parent / "data" / "jobs.json"
@@ -251,6 +258,28 @@ class ProfileUpdate(BaseModel):
 
 class VisitRequest(BaseModel):
     job_id: str = Field(min_length=1, max_length=300)
+
+
+GROWTH_CATEGORIES = {"Technical Skills", "System Design", "Behavioral & Soft Skills", "Resume & Portfolio", "Interview Mindset"}
+GROWTH_STATUSES = {"Identified", "Practicing", "Mastered"}
+
+
+class GrowthItemCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    category: str = Field(default="Technical Skills", max_length=50)
+    reflection: str = Field(default="", max_length=2000)
+    action_plan: str = Field(default="", max_length=2000)
+    status: str = Field(default="Identified", max_length=30)
+    source: str = Field(default="", max_length=150)
+
+
+class GrowthItemUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=150)
+    category: str | None = Field(default=None, max_length=50)
+    reflection: str | None = Field(default=None, max_length=2000)
+    action_plan: str | None = Field(default=None, max_length=2000)
+    status: str | None = Field(default=None, max_length=30)
+    source: str | None = Field(default=None, max_length=150)
 
 
 APPLICATION_STATUSES = {"Saved", "Applied", "Interviewing", "Rejected", "Offered", "Withdrawn"}
@@ -515,6 +544,91 @@ def save_preferences(body: dict, user: dict = Depends(current_user)):
     return preferences
 
 
+@app.get("/growth")
+def list_growth_items(user: dict = Depends(current_user)):
+    items = list(_user_collection("growth_logs").find({"user_id": user["id"]}).sort("created_at", -1))
+    return [
+        {
+            "id": str(item["_id"]),
+            "title": item.get("title", ""),
+            "category": item.get("category", "Technical Skills"),
+            "reflection": item.get("reflection", ""),
+            "action_plan": item.get("action_plan", ""),
+            "status": item.get("status", "Identified"),
+            "source": item.get("source", ""),
+            "created_at": item.get("created_at"),
+            "updated_at": item.get("updated_at"),
+        }
+        for item in items
+    ]
+
+
+@app.post("/growth")
+def create_growth_item(body: GrowthItemCreate, user: dict = Depends(current_user)):
+    category = body.category if body.category in GROWTH_CATEGORIES else "Technical Skills"
+    status = body.status if body.status in GROWTH_STATUSES else "Identified"
+    now = datetime.now(timezone.utc)
+    item_id = str(uuid4())
+    doc = {
+        "_id": item_id,
+        "user_id": user["id"],
+        "title": body.title.strip(),
+        "category": category,
+        "reflection": body.reflection.strip(),
+        "action_plan": body.action_plan.strip(),
+        "status": status,
+        "source": body.source.strip(),
+        "created_at": now,
+        "updated_at": now,
+    }
+    _user_collection("growth_logs").insert_one(doc)
+    return {**doc, "id": item_id}
+
+
+@app.patch("/growth/{item_id}")
+def update_growth_item(item_id: str, body: GrowthItemUpdate, user: dict = Depends(current_user)):
+    fields: dict[str, Any] = {"updated_at": datetime.now(timezone.utc)}
+    if body.title is not None:
+        fields["title"] = body.title.strip()
+    if body.category is not None:
+        fields["category"] = body.category if body.category in GROWTH_CATEGORIES else "Technical Skills"
+    if body.reflection is not None:
+        fields["reflection"] = body.reflection.strip()
+    if body.action_plan is not None:
+        fields["action_plan"] = body.action_plan.strip()
+    if body.status is not None:
+        fields["status"] = body.status if body.status in GROWTH_STATUSES else "Identified"
+    if body.source is not None:
+        fields["source"] = body.source.strip()
+
+    result = _user_collection("growth_logs").update_one(
+        {"_id": item_id, "user_id": user["id"]},
+        {"$set": fields}
+    )
+    if not result.matched_count:
+        raise HTTPException(status_code=404, detail="Growth record was not found.")
+    updated = _user_collection("growth_logs").find_one({"_id": item_id, "user_id": user["id"]})
+    return {
+        "id": str(updated["_id"]),
+        "title": updated.get("title", ""),
+        "category": updated.get("category", "Technical Skills"),
+        "reflection": updated.get("reflection", ""),
+        "action_plan": updated.get("action_plan", ""),
+        "status": updated.get("status", "Identified"),
+        "source": updated.get("source", ""),
+        "created_at": updated.get("created_at"),
+        "updated_at": updated.get("updated_at"),
+    }
+
+
+@app.delete("/growth/{item_id}")
+def delete_growth_item(item_id: str, user: dict = Depends(current_user)):
+    result = _user_collection("growth_logs").delete_one({"_id": item_id, "user_id": user["id"]})
+    if not result.deleted_count:
+        raise HTTPException(status_code=404, detail="Growth record was not found.")
+    return {"ok": True}
+
+
 @app.post("/jobs/match")
 def jobs_match(request: MatchRequest):
     if not request.resume_text.strip():
@@ -642,4 +756,255 @@ async def jobs_match_stream(body: StreamMatchRequest, request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# -----------------------------------------------------------------------------
+# AI Interview Coach & Debrief Endpoints (Gemini 2.5 Flash)
+# -----------------------------------------------------------------------------
+
+
+class CoachMessageRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    api_key: str | None = Field(default=None, max_length=200)
+
+
+class CoachSessionCreate(BaseModel):
+    title: str = Field(default="New Interview Debrief", max_length=150)
+    company: str = Field(default="", max_length=100)
+    role: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=2000)
+
+
+class GeminiKeyUpdate(BaseModel):
+    api_key: str = Field(min_length=1, max_length=200)
+
+
+class SaveGrowthFromCoach(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    category: str = Field(default="Technical Skills", max_length=50)
+    reflection: str = Field(default="", max_length=2000)
+    action_plan: str = Field(default="", max_length=2000)
+    source: str = Field(default="", max_length=150)
+    status: str = Field(default="Identified", max_length=30)
+
+
+@app.get("/interview-coach/status")
+def coach_status(user: dict = Depends(current_user)):
+    user_pref = _user_collection("user_preferences").find_one({"user_id": user["id"]}) or {}
+    key = get_effective_api_key(user_pref.get("gemini_api_key"))
+    return {
+        "has_api_key": bool(key),
+        "model": GEMINI_MODEL or "gemini-2.5-flash",
+        "key_source": "user_preferences" if user_pref.get("gemini_api_key") else ("env" if os.getenv("GEMINI_API_KEY") else ("config" if key else "none")),
+    }
+
+
+@app.post("/interview-coach/key")
+def update_coach_key(body: GeminiKeyUpdate, user: dict = Depends(current_user)):
+    clean_key = body.api_key.strip()
+    _user_collection("user_preferences").update_one(
+        {"user_id": user["id"]},
+        {"$set": {"gemini_api_key": clean_key, "updated_at": datetime.now(timezone.utc)}},
+        upsert=True,
+    )
+    return {"ok": True, "has_api_key": bool(clean_key)}
+
+
+@app.get("/interview-coach/sessions")
+def list_coach_sessions(user: dict = Depends(current_user)):
+    docs = list(_user_collection("interview_chats").find({"user_id": user["id"]}).sort("updated_at", -1).limit(50))
+    return [
+        {
+            "id": str(d["_id"]),
+            "title": d.get("title", "Interview Debrief"),
+            "company": d.get("company", ""),
+            "role": d.get("role", ""),
+            "notes": d.get("notes", ""),
+            "message_count": len(d.get("messages", [])),
+            "created_at": d.get("created_at"),
+            "updated_at": d.get("updated_at"),
+        }
+        for d in docs
+    ]
+
+
+@app.post("/interview-coach/sessions")
+def create_coach_session(body: CoachSessionCreate, user: dict = Depends(current_user)):
+    session_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+    title = body.title.strip() or (f"Debrief: {body.company}" if body.company.strip() else "Interview Debrief")
+    doc = {
+        "_id": session_id,
+        "user_id": user["id"],
+        "title": title,
+        "company": body.company.strip(),
+        "role": body.role.strip(),
+        "notes": body.notes.strip(),
+        "messages": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    _user_collection("interview_chats").insert_one(doc)
+    return {
+        "id": session_id,
+        "title": title,
+        "company": body.company.strip(),
+        "role": body.role.strip(),
+        "notes": body.notes.strip(),
+        "messages": [],
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+
+@app.get("/interview-coach/sessions/{session_id}")
+def get_coach_session(session_id: str, user: dict = Depends(current_user)):
+    doc = _user_collection("interview_chats").find_one({"_id": session_id, "user_id": user["id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Debrief session was not found.")
+    return {
+        "id": str(doc["_id"]),
+        "title": doc.get("title", "Interview Debrief"),
+        "company": doc.get("company", ""),
+        "role": doc.get("role", ""),
+        "notes": doc.get("notes", ""),
+        "messages": doc.get("messages", []),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+    }
+
+
+@app.delete("/interview-coach/sessions/{session_id}")
+def delete_coach_session(session_id: str, user: dict = Depends(current_user)):
+    res = _user_collection("interview_chats").delete_one({"_id": session_id, "user_id": user["id"]})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Debrief session was not found.")
+    return {"ok": True}
+
+
+@app.post("/interview-coach/sessions/{session_id}/message")
+def send_coach_message(session_id: str, body: CoachMessageRequest, user: dict = Depends(current_user)):
+    doc = _user_collection("interview_chats").find_one({"_id": session_id, "user_id": user["id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Debrief session was not found.")
+
+    user_pref = _user_collection("user_preferences").find_one({"user_id": user["id"]}) or {}
+    effective_key = body.api_key or get_effective_api_key(user_pref.get("gemini_api_key"))
+
+    memories = list(_user_collection("interview_memories").find({"user_id": user["id"]}).sort("created_at", -1).limit(10))
+    growth_logs = list(_user_collection("growth_logs").find({"user_id": user["id"]}).sort("created_at", -1).limit(15))
+    applications = list(_user_collection("applications").find({"user_id": user["id"]}).limit(10))
+
+    user_name = user.get("name") or user.get("email", "").split("@")[0] or "Candidate"
+    system_prompt = build_coach_system_prompt(user_name, memories, growth_logs, applications)
+
+    now = datetime.now(timezone.utc)
+    user_msg = {
+        "id": str(uuid4()),
+        "role": "user",
+        "content": body.content.strip(),
+        "created_at": now.isoformat(),
+    }
+
+    history = list(doc.get("messages", []))
+    history.append(user_msg)
+
+    dialog = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    reply, extracted_growth, model_used = call_gemini_chat(dialog, system_prompt, effective_key)
+
+    assistant_msg = {
+        "id": str(uuid4()),
+        "role": "assistant",
+        "content": reply,
+        "model": model_used,
+        "extracted_growth": extracted_growth,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    history.append(assistant_msg)
+
+    updates: dict[str, Any] = {
+        "messages": history,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    if doc.get("title") in {"New Interview Debrief", "Interview Debrief", ""}:
+        first_words = " ".join(body.content.strip().split()[:6])
+        if first_words:
+            updates["title"] = first_words[:50]
+
+    _user_collection("interview_chats").update_one(
+        {"_id": session_id, "user_id": user["id"]},
+        {"$set": updates},
+    )
+
+    if extracted_growth:
+        weaknesses_found = [item["title"] for item in extracted_growth if item.get("title")]
+        mem_doc = {
+            "_id": str(uuid4()),
+            "user_id": user["id"],
+            "session_id": session_id,
+            "company": doc.get("company", ""),
+            "role": doc.get("role", ""),
+            "weaknesses": weaknesses_found,
+            "takeaways": reply[:300],
+            "created_at": datetime.now(timezone.utc),
+        }
+        _user_collection("interview_memories").insert_one(mem_doc)
+
+    return {
+        "reply": reply,
+        "model": model_used,
+        "extracted_growth": extracted_growth,
+        "session_id": session_id,
+    }
+
+
+@app.post("/interview-coach/save-growth")
+def save_growth_from_coach(body: SaveGrowthFromCoach, user: dict = Depends(current_user)):
+    category = body.category if body.category in GROWTH_CATEGORIES else "Technical Skills"
+    status = body.status if body.status in GROWTH_STATUSES else "Identified"
+    now = datetime.now(timezone.utc)
+    item_id = str(uuid4())
+    doc = {
+        "_id": item_id,
+        "user_id": user["id"],
+        "title": body.title.strip(),
+        "category": category,
+        "reflection": body.reflection.strip(),
+        "action_plan": body.action_plan.strip(),
+        "status": status,
+        "source": body.source.strip() or "Interview Debrief Coach",
+        "created_at": now,
+        "updated_at": now,
+    }
+    _user_collection("growth_logs").insert_one(doc)
+    return {
+        "id": item_id,
+        "title": doc["title"],
+        "category": doc["category"],
+        "reflection": doc["reflection"],
+        "action_plan": doc["action_plan"],
+        "status": doc["status"],
+        "source": doc["source"],
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+
+
+@app.get("/interview-coach/memories")
+def list_coach_memories(user: dict = Depends(current_user)):
+    docs = list(_user_collection("interview_memories").find({"user_id": user["id"]}).sort("created_at", -1).limit(30))
+    return [
+        {
+            "id": str(d["_id"]),
+            "session_id": d.get("session_id", ""),
+            "company": d.get("company", ""),
+            "role": d.get("role", ""),
+            "weaknesses": d.get("weaknesses", []),
+            "takeaways": d.get("takeaways", ""),
+            "created_at": d.get("created_at"),
+        }
+        for d in docs
+    ]
+
 

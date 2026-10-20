@@ -171,6 +171,8 @@ class AuthenticationTests(unittest.TestCase):
         with patch.object(main, "get_database", return_value=fake_db), \
              patch.object(security, "get_database", return_value=fake_db), \
              patch.object(main, "catalog_jobs", return_value=[job]), \
+             patch.object(main, "catalog_migrated", return_value=False), \
+             patch.object(main, "find_jobs_by_ids", return_value=[job]), \
              patch.object(security, "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-hmac"):
             with TestClient(main.app) as client:
                 registered = client.post("/auth/register", json={"email": "Person@example.test", "password": "a secure password", "name": "Person"})
