@@ -36,9 +36,12 @@ INDIA_CITIES = (
 app = FastAPI(title="JobSync AI")
 _refresh_task: asyncio.Task | None = None
 
+_raw_origins = [origin.strip().rstrip("/") for origin in FRONTEND_ORIGIN.split(",") if origin.strip()]
+ALLOWED_ORIGINS = _raw_origins if _raw_origins else ["http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
