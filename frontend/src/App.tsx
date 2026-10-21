@@ -4,7 +4,7 @@ import {
   ArrowRight, Bookmark, BrainCircuit, BriefcaseBusiness, Check, ChevronDown, ChevronLeft,
   ChevronRight, CircleHelp, FileText, FilterX, Globe2,
   LoaderCircle, MapPin, Menu, Moon, Search, Sparkles, Sun,
-  ShieldCheck, Target, TrendingUp, UploadCloud, Wifi, WifiOff, X, Zap,
+  ShieldCheck, Target, TrendingUp, UploadCloud, X, Zap,
 } from "lucide-react";
 
 const API = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -603,8 +603,6 @@ export function Dashboard() {
     } catch { /* Activity is optional while the backend is offline. */ }
   }
 
-  const statusCopy = apiStatus === "online" ? "API connected"
-    : apiStatus === "offline" ? "API unavailable" : "Checking API";
   const avatarLabel = (authUser?.name || authUser?.email || "U").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0].toLocaleUpperCase()).join("");
 
   return (
@@ -632,10 +630,6 @@ export function Dashboard() {
             </a>
             <a className="text-sm font-medium text-slate-600 hover:text-indigo-700" href="#resume-upload">Find jobs</a>
           </nav>
-          <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 md:flex" aria-live="polite">
-            {apiStatus === "online" ? <Wifi size={14} className="text-emerald-600" /> : apiStatus === "offline" ? <WifiOff size={14} className="text-rose-500" /> : <LoaderCircle size={14} className="animate-spin text-slate-400" />}
-            <span className={"text-xs font-medium " + (apiStatus === "online" ? "text-emerald-700" : apiStatus === "offline" ? "text-rose-600" : "text-slate-500")}>{statusCopy}</span>
-          </div>
           <div className="flex items-center gap-2">
           {authUser ? <details className="relative"><summary aria-label="Profile menu" className="inline-flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">{avatarLabel}</span><span className="hidden sm:inline">{authUser.name || authUser.email}</span><ChevronDown size={14} /></summary><div className="absolute right-0 top-12 z-40 min-w-48 rounded-xl border border-slate-200 bg-white p-2 shadow-lg"><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/profile">Profile</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/coach">Interview Coach</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/applications">Applications</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/growth">Weaknesses & Growth</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/activity">Activity</a><a className="block rounded-lg px-3 py-2 text-sm hover:bg-slate-50" href="/saved-jobs">Saved Jobs</a><button onClick={signOut} className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-700 hover:bg-rose-50">Logout</button></div></details> : <a href="/login" className="rounded-lg px-3 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50">Login</a>}
           <button type="button" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} aria-pressed={theme === "dark"} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600"><span aria-hidden="true">{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</span><span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span></button>
@@ -662,7 +656,6 @@ export function Dashboard() {
             </span>
           </a>
           <a onClick={() => setMobileNavOpen(false)} className="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href="#resume-upload">Find jobs</a>
-          <p className="flex items-center gap-2 px-3 pt-2 text-xs text-slate-500">{apiStatus === "online" ? <Wifi size={13} className="text-emerald-600" /> : <WifiOff size={13} className="text-rose-500" />}{statusCopy}</p>
         </nav>}
       </header>
 
@@ -813,22 +806,22 @@ export function Dashboard() {
         </section>
 
         {/* Interview Debrief AI Mentor Callout */}
-        <section className="mt-8 rounded-3xl border border-indigo-100 bg-gradient-to-r from-violet-50 via-indigo-50 to-sky-50 p-6 sm:p-9 shadow-xs">
+        <section className="ai-mentor-callout mt-8 rounded-3xl border border-indigo-100 dark:border-indigo-900/60 bg-gradient-to-r from-violet-50 via-indigo-50 to-sky-50 dark:from-slate-900 dark:via-indigo-950/70 dark:to-slate-900 p-6 sm:p-9 shadow-xs">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-2xl">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-3 py-0.5 text-xs font-semibold text-indigo-800">
-                <Sparkles size={13} className="text-indigo-600" /> AI Debrief Room · Intelligent Mentorship
+              <span className="ai-mentor-badge inline-flex items-center gap-1.5 rounded-full bg-indigo-100 dark:bg-indigo-900/70 border border-indigo-200/60 dark:border-indigo-700/60 px-3 py-0.5 text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+                <Sparkles size={13} className="text-indigo-600 dark:text-indigo-300" /> AI Debrief Room · Intelligent Mentorship
               </span>
-              <h3 className="text-2xl font-bold tracking-tight text-slate-900">
+              <h3 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
                 Just had an interview? Talk to your AI Coach.
               </h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
                 “Everything is a learning until you win. Be patient to achieve big.” Share your entire experience—questions asked, tricky edge-cases, or rejections. The AI mentor boosts your confidence, memorizes your journey, and advises on what to target next.
               </p>
             </div>
             <a
               href="/coach"
-              className="inline-flex shrink-0 min-h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-md transition hover:from-violet-700 hover:to-indigo-700"
+              className="inline-flex shrink-0 min-h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-6 text-sm font-semibold text-white shadow-md transition hover:from-violet-700 hover:to-indigo-700 hover:shadow-indigo-500/25"
             >
               <Sparkles size={16} className="text-amber-300" /> Start AI Interview Debrief →
             </a>
